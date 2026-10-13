@@ -62,7 +62,8 @@ def _format(height: int) -> str:
 
 def _base_opts(outdir: Path) -> dict:
     opts = {
-        "outtmpl": str(outdir / "%(id)s.%(ext)s"),
+        "outtmpl": "%(id)s.%(ext)s",
+        "paths": {"home": str(outdir), "temp": str(outdir)},
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
@@ -122,23 +123,31 @@ def _find_file(outdir: Path, info: dict) -> Path | None:
     return max(files, key=lambda p: p.stat().st_mtime) if files else None
 
 
-def _download_entry(entry: dict, outdir: Path, max_bytes: int) -> Video:
+def _use_format(ydl: yt_dlp.YoutubeDL, height: int, outdir: Path) -> None:
+    # Bir YoutubeDL nusgasy ulanylýar: TikTok-yň maglumat alanda beren
+    # cookie-leri ýüklemek üçin hem gerek (bolmasa 403 berýär).
+    ydl.params["format"] = _format(height)
+    ydl.format_selector = ydl.build_format_selector(ydl.params["format"])
+    ydl.params["paths"] = {"home": str(outdir), "temp": str(outdir)}
+
+
+def _download_entry(ydl: yt_dlp.YoutubeDL, entry: dict, outdir: Path,
+                    max_bytes: int) -> Video:
     last_err = None
     for height in HEIGHTS:
-        opts = _base_opts(outdir) | {"format": _format(height)}
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            try:
-                planned = ydl.process_ie_result(copy.deepcopy(entry), download=False)
-            except yt_dlp.utils.DownloadError as e:
-                last_err = e
-                continue
-            est = _estimate_size(planned)
-            if est and est > max_bytes * 1.05:
-                log.info("%sp ~%d MB, has kiçisi synanyşylýar", height, est >> 20)
-                continue
-            for p in outdir.iterdir():
-                p.unlink()
-            info = ydl.process_ie_result(copy.deepcopy(entry), download=True)
+        _use_format(ydl, height, outdir)
+        try:
+            planned = ydl.process_ie_result(copy.deepcopy(entry), download=False)
+        except yt_dlp.utils.DownloadError as e:
+            last_err = e
+            continue
+        est = _estimate_size(planned)
+        if est and est > max_bytes * 1.05:
+            log.info("%sp ~%d MB, has kiçisi synanyşylýar", height, est >> 20)
+            continue
+        for p in outdir.iterdir():
+            p.unlink()
+        info = ydl.process_ie_result(copy.deepcopy(entry), download=True)
 
         path = _find_file(outdir, info)
         if not path:
@@ -160,8 +169,63 @@ def _download_entry(entry: dict, outdir: Path, max_bytes: int) -> Video:
     raise DownloadError(f"Wideo örän uly: Telegram {limit_mb} MB-dan uly faýly kabul etmeýär.")
 
 
+def _tikwm(url: str, workdir: Path, max_bytes: int) -> list[Video]:
+    """Ätiýaçlyk ýol: TikTok yt-dlp-ni petiklese tikwm.com API-si arkaly."""
+    import urllib.parse
+    import urllib.request
+
+    req = urllib.request.Request(
+        "https://www.tikwm.com/api/?hd=1&url=" + urllib.parse.quote(url, safe=""),
+        headers={"User-Agent": "Mozilla/5.0"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.load(resp).get("data") or {}
+    sources = [data.get("hdplay"), data.get("play")]  # ikisi hem suw belgisiz
+    sources = [u if u.startswith("http") else "https://www.tikwm.com" + u
+               for u in sources if u]
+    if not sources:
+        raise DownloadError("Bu TikTok postunda wideo ýok (surat bolmagy mümkin).")
+
+    path = workdir / "tikwm" / f"{data.get('id', 'video')}.mp4"
+    path.parent.mkdir(exist_ok=True)
+    for src in sources:
+        r = urllib.request.Request(src, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(r, timeout=120) as resp, open(path, "wb") as f:
+            size = 0
+            while chunk := resp.read(1 << 16):
+                size += len(chunk)
+                if size > max_bytes:
+                    break
+                f.write(chunk)
+        if 0 < size <= max_bytes:
+            meta = _probe(path)
+            return [Video(path=path, title=(data.get("title") or "")[:200],
+                          duration=meta.get("duration") or data.get("duration"),
+                          width=meta.get("width"), height=meta.get("height"))]
+    limit_mb = max_bytes >> 20
+    raise DownloadError(f"Wideo örän uly: Telegram {limit_mb} MB-dan uly faýly kabul etmeýär.")
+
+
 def download(url: str, workdir: Path, max_bytes: int) -> list[Video]:
     """Sinhron: asyncio.to_thread içinde çagyryň."""
+    try:
+        return _download_ytdlp(url, workdir, max_bytes)
+    except DownloadError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        if "tiktok.com" not in url.lower():
+            raise
+        log.warning("yt-dlp TikTok-da şowsuz (%s), tikwm synanyşylýar", e)
+        try:
+            return _tikwm(url, workdir, max_bytes)
+        except DownloadError:
+            raise
+        except Exception as e2:  # noqa: BLE001
+            log.warning("tikwm hem şowsuz: %r", e2)
+            raise e from e2
+
+
+def _download_ytdlp(url: str, workdir: Path, max_bytes: int) -> list[Video]:
     with yt_dlp.YoutubeDL(_base_opts(workdir)) as ydl:
         info = ydl.extract_info(url, download=False, process=False)
         for _ in range(3):  # gysga salgylar (vt.tiktok.com we ş.m.) başga salga ugradýar
@@ -169,22 +233,21 @@ def download(url: str, workdir: Path, max_bytes: int) -> list[Video]:
                 break
             info = ydl.extract_info(info["url"], download=False, process=False)
 
-    if info.get("_type") in ("playlist", "multi_video"):
-        entries = [e for e in (info.get("entries") or []) if e][:MAX_ITEMS]
-    else:
-        entries = [info]
-    if not entries:
-        raise DownloadError("Bu salgyda wideo tapylmady.")
+        if info.get("_type") in ("playlist", "multi_video"):
+            entries = [e for e in (info.get("entries") or []) if e][:MAX_ITEMS]
+        else:
+            entries = [info]
+        if not entries:
+            raise DownloadError("Bu salgyda wideo tapylmady.")
 
-    videos = []
-    for i, entry in enumerate(entries):
-        if entry.get("_type") in ("url", "url_transparent"):
-            with yt_dlp.YoutubeDL(_base_opts(workdir)) as ydl:
+        videos = []
+        for i, entry in enumerate(entries):
+            if entry.get("_type") in ("url", "url_transparent"):
                 entry = ydl.extract_info(entry["url"], download=False, process=False)
-        sub = workdir / str(i)
-        sub.mkdir(exist_ok=True)
-        videos.append(_download_entry(entry, sub, max_bytes))
-    return videos
+            sub = workdir / str(i)
+            sub.mkdir(exist_ok=True)
+            videos.append(_download_entry(ydl, entry, sub, max_bytes))
+        return videos
 
 
 def humanize_error(err: Exception) -> str:
