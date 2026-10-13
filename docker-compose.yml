@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DOWNLOAD_DIR: /downloads
+      COOKIES_FILE: /app/cookies.txt
+    volumes:
+      - downloads:/downloads
+      - ./cookies.txt:/app/cookies.txt:ro
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  downloads:
