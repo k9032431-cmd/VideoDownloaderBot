@@ -34,6 +34,28 @@ Serweri alanyňyzdan soň size **IP salgy** we **root parol** bererler.
 
 ### 3-nji ädim — Serwere birikmek
 
+#### Termius bilen (telefon ýa-da kompýuter)
+
+1. [Termius](https://termius.com) programmasyny guruň (Android, iPhone, Windows, Mac). Hasap açmak hökman däl, "Skip" / "Continue without account" basyp bilersiňiz.
+2. **Hosts** bölümine giriň → **+** düwmesi → **New Host**.
+3. Doldurmaly ýerler:
+   - **Label (Alias)**: islendik at, meselem `Bot serwer`
+   - **Address (Hostname)**: serweriň IP salgysy, meselem `185.12.34.56`
+   - **Port**: `22`
+   - **Username**: `root`
+   - **Password**: serweriň paroly
+4. **Save** (✓) basyň.
+5. Döredilen host-a basyň. "Do you trust this host?" diýip sorasa → **Continue / Add and continue**.
+6. Gara ekran (terminal) açylar we `root@...:~#` ýazgysy görner. Bu, serwere birikendigiňizi aňladýar.
+
+**Terminala buýruk goýmak (paste):**
+- Telefonda: ekrana barmagyňyzy uzak basyp saklaň → **Paste**
+- Kompýuterde: `Ctrl+Shift+V` ýa-da sycanyň sag düwmesi → **Paste**
+
+**Termius-dan faýl ugratmak (meselem `cookies.txt`):** host-uň ýanyndaky **SFTP** bölümini açyň → serwer tarapynda `/opt/videodownloaderbot` papkasyna geçiň → faýly şol ýere süýräp goýuň (telefonda: **⋮ → Upload**).
+
+#### Kompýuterde Termius-syz
+
 **Windows**: `PowerShell` açyň. **Mac / Linux**: `Terminal` açyň. Soňra ýazyň:
 
 ```bash
@@ -102,7 +124,7 @@ Käbir Instagram postlary ýa-da YouTube serweriňizi "bot" hasaplap, giriş (lo
 1. Kompýuteriňizde Chrome/Firefox-a **[Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)** giňeltmesini guruň.
 2. Instagram-a / YouTube-a **goşmaça (esasy däl) hasap** bilen giriň.
 3. Giňeltme arkaly `cookies.txt` faýlyny göçürip alyň (Instagram we YouTube üçin birleşdirip bilersiňiz — bir faýla yzly-yzyna goýuň).
-4. Faýly serwere `/opt/videodownloaderbot/cookies.txt` ýerine goýuň, meselem kompýuteriňizden:
+4. Faýly serwere `/opt/videodownloaderbot/cookies.txt` ýerine goýuň (Termius-da **SFTP** arkaly, ýa-da kompýuteriňizden):
    ```bash
    scp cookies.txt root@SERWERIŇIZIŇ_IP_SALGYSY:/opt/videodownloaderbot/cookies.txt
    ```
